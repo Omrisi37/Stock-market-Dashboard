@@ -77,9 +77,9 @@ search_term = st.sidebar.text_input(
     placeholder="e.g., Apple, AAPL, Microsoft"
 )
 
-# Function to search stocks
+# Function to search stocks with better error handling
 @st.cache_data(ttl=3600)  # Cache for 1 hour
-def search_stocks(query):
+def search_stocks(query, current_exchange):
     """
     Search for stocks based on company name or symbol
     """
@@ -87,69 +87,122 @@ def search_stocks(query):
         return []
     
     try:
-        # Common symbols for different markets
         search_results = []
+        query_upper = query.upper().strip()
         
-        # Try direct symbol lookup
-        try:
-            ticker = yf.Ticker(query.upper())
-            info = ticker.info
-            if info and 'longName' in info:
-                search_results.append({
-                    'symbol': query.upper(),
-                    'name': info.get('longName', query.upper()),
-                    'sector': info.get('sector', 'N/A')
-                })
-        except:
-            pass
+        # Handle different exchanges
+        if current_exchange == "🇮🇱 Israel (TASE)":
+            # Try with .TA suffix for Israeli stocks
+            test_symbols = [query_upper, f"{query_upper}.TA"]
+        elif current_exchange == "🇪🇺 Europe":
+            # Try common European suffixes
+            test_symbols = [query_upper, f"{query_upper}.AS", f"{query_upper}.DE", f"{query_upper}.PA"]
+        elif current_exchange == "🇯🇵 Japan":
+            # Try with .T suffix for Japanese stocks
+            test_symbols = [query_upper, f"{query_upper}.T"]
+        else:
+            # US markets - try as is
+            test_symbols = [query_upper]
         
-        # Add Israeli stocks suffix if needed
-        if selected_exchange == "🇮🇱 Israel (TASE)" and not query.endswith('.TA'):
-            ta_symbol = f"{query.upper()}.TA"
+        for symbol in test_symbols:
             try:
-                ticker = yf.Ticker(ta_symbol)
+                ticker = yf.Ticker(symbol)
+                # Try to get basic info with timeout
                 info = ticker.info
-                if info and 'longName' in info:
-                    search_results.append({
-                        'symbol': ta_symbol,
-                        'name': info.get('longName', ta_symbol),
-                        'sector': info.get('sector', 'N/A')
-                    })
-            except:
-                pass
+                
+                # Check if we got valid data
+                if info and len(info) > 3:  # Basic check for valid response
+                    long_name = info.get('longName', info.get('shortName', symbol))
+                    if long_name and long_name != symbol:
+                        search_results.append({
+                            'symbol': symbol,
+                            'name': long_name,
+                            'sector': info.get('sector', 'N/A'),
+                            'currency': info.get('currency', 'N/A')
+                        })
+                        break  # Found valid result, no need to try other variations
+                        
+            except Exception:
+                continue  # Try next symbol variation
         
-        return search_results[:10]  # Limit to 10 results
+        return search_results[:5]  # Limit to 5 results
+        
     except Exception as e:
-        st.sidebar.error(f"Search error: {e}")
         return []
+
+# Initialize session state for selected exchange
+if 'current_exchange' not in st.session_state:
+    st.session_state.current_exchange = selected_exchange
+
+# Reset stocks if exchange changed
+if st.session_state.current_exchange != selected_exchange:
+    st.session_state.current_exchange = selected_exchange
+    st.session_state.selected_stocks = exchange_data['popular_stocks'][:5]
+
+# Initialize selected stocks for current exchange
+if 'selected_stocks' not in st.session_state:
+    st.session_state.selected_stocks = exchange_data['popular_stocks'][:5]
+
+# Create extended options list (popular stocks + custom stocks)
+available_stocks = list(exchange_data['popular_stocks'])
+custom_stocks = getattr(st.session_state, 'custom_stocks', [])
+
+# Add custom stocks to available options if they're not already there
+for stock in custom_stocks:
+    if stock not in available_stocks:
+        available_stocks.append(stock)
+
+# Ensure selected stocks are in available options
+valid_selected_stocks = []
+for stock in st.session_state.selected_stocks:
+    if stock in available_stocks:
+        valid_selected_stocks.append(stock)
+    elif stock in exchange_data['popular_stocks']:
+        valid_selected_stocks.append(stock)
+
+# Update session state with valid stocks only
+st.session_state.selected_stocks = valid_selected_stocks
 
 # Show search results
 if search_term:
     with st.sidebar:
         with st.spinner("Searching..."):
-            search_results = search_stocks(search_term)
+            search_results = search_stocks(search_term, selected_exchange)
         
         if search_results:
             st.sidebar.write("**Search Results:**")
-            for result in search_results:
-                if st.sidebar.button(f"{result['symbol']} - {result['name'][:30]}...", key=result['symbol']):
-                    if 'selected_stocks' not in st.session_state:
-                        st.session_state.selected_stocks = []
+            for i, result in enumerate(search_results):
+                button_key = f"search_{result['symbol']}_{i}_{hash(search_term)}"
+                if st.sidebar.button(
+                    f"{result['symbol']} - {result['name'][:25]}...", 
+                    key=button_key,
+                    help=f"Sector: {result['sector']}, Currency: {result['currency']}"
+                ):
+                    # Add to custom stocks list
+                    if 'custom_stocks' not in st.session_state:
+                        st.session_state.custom_stocks = []
+                    
+                    # Add to available stocks if not already there
+                    if result['symbol'] not in available_stocks:
+                        available_stocks.append(result['symbol'])
+                        st.session_state.custom_stocks.append(result['symbol'])
+                    
+                    # Add to selected stocks if not already selected
                     if result['symbol'] not in st.session_state.selected_stocks:
                         st.session_state.selected_stocks.append(result['symbol'])
+                    
+                    # Rerun to update the multiselect
+                    st.rerun()
         else:
             st.sidebar.write("No results found")
-
-# Stock selection with session state
-if 'selected_stocks' not in st.session_state:
-    st.session_state.selected_stocks = exchange_data['popular_stocks'][:5]
 
 # Stock symbols to track
 selected_stocks = st.sidebar.multiselect(
     "Selected Stocks:",
-    exchange_data['popular_stocks'],
+    available_stocks,
     default=st.session_state.selected_stocks,
-    key="stock_multiselect"
+    key="stock_multiselect",
+    help="Select stocks to track. Use search above to add more stocks."
 )
 
 # Update session state
@@ -199,18 +252,30 @@ def get_market_status():
 market_status = get_market_status()
 st.sidebar.markdown(f"**Market Status:** {market_status}")
 
-# Refresh controls
+# Refresh controls with better error handling
 col1, col2 = st.sidebar.columns(2)
 with col1:
-    if st.button("🔄 Refresh Data"):
+    if st.button("🔄 Refresh", key="refresh_button"):
         # Clear all cached data
         st.cache_data.clear()
+        # Reset search term
+        if 'search_term' in st.session_state:
+            del st.session_state['search_term']
+        st.success("Data refreshed!")
+        time.sleep(1)
         st.rerun()
 
 with col2:
-    if st.button("🗑️ Clear Cache"):
+    if st.button("🗑️ Clear", key="clear_button"):
+        # Clear cache and reset selections
         st.cache_data.clear()
+        if 'selected_stocks' in st.session_state:
+            st.session_state.selected_stocks = exchange_data['popular_stocks'][:5]
+        if 'custom_stocks' in st.session_state:
+            del st.session_state['custom_stocks']
         st.success("Cache cleared!")
+        time.sleep(1)
+        st.rerun()
 
 # Function to get stock data with error handling
 @st.cache_data(ttl=60)  # Cache for 1 minute
@@ -527,3 +592,20 @@ with col3:
     **Last Updated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}  
     **Time Period:** {time_period}  
     """)
+
+# Instructions for running
+st.sidebar.markdown("---")
+st.sidebar.markdown("""
+### Instructions:
+1. Select exchange from dropdown
+2. Search for stocks by name/symbol
+3. Choose time period for analysis
+4. Click refresh to update data
+5. Use clear cache if data seems stuck
+
+### Israeli Stocks Examples:
+- TEVA.TA (Teva Pharmaceutical)
+- ICL.TA (ICL Group)
+- CHKP.TA (Check Point)
+- NICE.TA (Nice Systems)
+""")
