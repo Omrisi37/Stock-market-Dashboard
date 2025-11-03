@@ -1,5 +1,4 @@
-# Real-Time Economic Dashboard - Enhanced Version
-# Save this as: economic_dashboard.py
+
 
 import streamlit as st
 import yfinance as yf
@@ -10,7 +9,6 @@ from datetime import datetime, timedelta
 import requests
 import time
 
-# Page configuration
 st.set_page_config(
     page_title="Economic Dashboard", 
     page_icon="📈", 
@@ -21,7 +19,6 @@ st.set_page_config(
 st.title("📈 Real-Time Economic Dashboard")
 st.markdown("---")
 
-# Stock exchanges and their indices
 EXCHANGES = {
     "🇺🇸 US Markets": {
         "indices": {
@@ -70,14 +67,12 @@ selected_exchange = st.sidebar.selectbox(
 # Get data for selected exchange
 exchange_data = EXCHANGES[selected_exchange]
 
-# Stock search functionality
 st.sidebar.subheader("🔍 Search Stocks")
 search_term = st.sidebar.text_input(
     "Search by company name or symbol:",
     placeholder="e.g., Apple, AAPL, Microsoft"
 )
 
-# Function to search stocks with better error handling
 @st.cache_data(ttl=3600)  # Cache for 1 hour
 def search_stocks(query, current_exchange):
     """
@@ -130,29 +125,24 @@ def search_stocks(query, current_exchange):
     except Exception as e:
         return []
 
-# Initialize session state for selected exchange
 if 'current_exchange' not in st.session_state:
     st.session_state.current_exchange = selected_exchange
 
-# Reset stocks if exchange changed
 if st.session_state.current_exchange != selected_exchange:
     st.session_state.current_exchange = selected_exchange
     st.session_state.selected_stocks = exchange_data['popular_stocks'][:5]
 
-# Initialize selected stocks for current exchange
 if 'selected_stocks' not in st.session_state:
     st.session_state.selected_stocks = exchange_data['popular_stocks'][:5]
 
-# Create extended options list (popular stocks + custom stocks)
 available_stocks = list(exchange_data['popular_stocks'])
 custom_stocks = getattr(st.session_state, 'custom_stocks', [])
 
-# Add custom stocks to available options if they're not already there
+# Add custom stocks to available 
 for stock in custom_stocks:
     if stock not in available_stocks:
         available_stocks.append(stock)
 
-# Ensure selected stocks are in available options
 valid_selected_stocks = []
 for stock in st.session_state.selected_stocks:
     if stock in available_stocks:
@@ -160,7 +150,7 @@ for stock in st.session_state.selected_stocks:
     elif stock in exchange_data['popular_stocks']:
         valid_selected_stocks.append(stock)
 
-# Update session state with valid stocks only
+# Update session 
 st.session_state.selected_stocks = valid_selected_stocks
 
 # Show search results
